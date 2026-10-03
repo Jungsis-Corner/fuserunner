@@ -9,6 +9,8 @@ Im Spiel ist Deutsch die Standardsprache, Englisch lässt sich im Menü umschalt
 
 ## Aufbau des Repos
 
+Das Projekt liegt unter `~/fuserunner` (WSL), die Werkzeugkette unter `~/toolchain` (also neben dem Repo, nicht darin).
+
 ```
 src/fuse.asm        Hauptquelltext (~3700 Zeilen), bindet am Ende die *.inc-Dateien ein
 src/gfx.py          Sprites + Pixel/Masken-Tabellen      -> gfx.inc
@@ -26,7 +28,8 @@ Die `*.inc` werden erzeugt, also nie von Hand bearbeiten. Stattdessen das passen
 
 ## Werkzeuge einrichten
 
-`./tools/setup_tools.sh` baut alles nach `./toolchain/`:
+`./tools/setup_tools.sh` baut alles nach `./toolchain/` (relativ zum Aufrufverzeichnis).
+Hier liegt die Werkzeugkette bereits fertig in `~/toolchain`:
 
 - vasm (vasmm68k_mot)
 - sQLux (Emulator, inklusive Minerva-ROM)
@@ -40,7 +43,7 @@ Die 64-Bit-Version schreibt kaputte WIN-Images und stürzt ab, weil `long` dort 
 ## Bauen
 
 ```
-cd src && PATH=../toolchain/vasm:../toolchain/qxltools:$PATH ./make.sh
+cd ~/fuserunner/src && PATH=~/toolchain/vasm:~/toolchain/qxltools:$PATH ./make.sh
 ```
 make.sh startet der Reihe nach gfx.py, backdrops.py, music.py, splash.py und levels.py, danach vasm. Es erzeugt:
 
@@ -58,6 +61,7 @@ Bitte nachziehen; aktuell steht dort 86016.
 ## Testen (ohne echten QL)
 
 ```
+export TOOLCHAIN=~/toolchain          # emu.sh sucht sonst in ./toolchain
 ./tools/emu.sh [-DSCHALTER=wert ...]   # baut src/fuse.asm mit vasm, startet sQLux auf Xvfb :9
 ./tools/key.sh space 0.2               # Taste halten (xdotool-Namen: Up Down Left Right space Return Escape F1..F5 a..z)
 ./tools/shot.sh name                   # Screenshot -> emu/shots/name.png, dann mit Read ansehen
