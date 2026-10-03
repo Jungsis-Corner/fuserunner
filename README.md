@@ -29,7 +29,7 @@ wer die brennenden Bomben der Reihe nach erwischt, bekommt am Rundenende Bonuspu
 Die fertigen Spieldateien gibt es unter **[Releases](https://github.com/Jungsis-Corner/fuserunner/releases/latest)**:
 
 - `fuserunner.win` – QXL.WIN-Image mit BOOT und Spiel für MiSTer, QPC2, Q-emuLator und QL-SD
-- `fuserunner-v1.1.zip` (one ZIP per version) – alle Spieldateien inklusive Anleitung (`LIESMICH_README.txt`)
+- `fuserunner-v1.1.zip` (je Version eine eigene ZIP-Datei) – alle Spieldateien inklusive Anleitung (`LIESMICH_README.txt`)
 
 Die ausführliche Anleitung zum Starten (auch auf dem MiSTer), zur Steuerung und zu den Spielregeln
 steht in [LIESMICH_README.txt](LIESMICH_README.txt).
