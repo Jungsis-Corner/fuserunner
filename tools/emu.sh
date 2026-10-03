@@ -20,7 +20,8 @@ FAST_STARTUP = 1
 SKIP_BOOT = 1
 DEVICE = MDV1,$T/emu/mdv1/,qdos-like
 BOOT_DEVICE = MDV1
-SPEED = 1
+SPEED = ${EMUSPEED:-1}
+NTSC = ${EMUNTSC:-0}
 SOUND = 5
 EOI
 pgrep Xvfb >/dev/null || (Xvfb :9 -screen 0 1024x768x24 >/dev/null 2>&1 &); sleep 1

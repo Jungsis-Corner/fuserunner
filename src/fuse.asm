@@ -17,6 +17,9 @@ SOUND   equ     1               ; 1 = IPC beeps
     ifnd STARTRD
 STARTRD equ     1               ; first round (for testing)
     endc
+    ifnd CATCHUP
+CATCHUP equ     1               ; 1 = extra logic step when a loop took more than LOOPF frames
+    endc
 
 ;---------------------------------------------------------------------
 ; Hardware / playfield
@@ -1197,12 +1200,22 @@ mainloop:
         btst    #K_ENTER,d1
         beq.s   .np
         bsr     pause
-.np     bsr     update_jack
-        bsr     update_enemies
-        bsr     update_bonus
-        bsr     check_bombs
+.np     bsr     check_hits      ; on the positions just shown on screen
+        tst.w   v_dead(a5)
+        bne     .st
+        bsr     game_step
+        ifne    CATCHUP
+        cmp.w   #LOOPF,v_lag(a5) ; loop took longer: one extra logic step
+        bls     .st
+        tst.w   v_bleft(a5)
+        beq     .st
         bsr     check_hits
-        bsr     check_life
+        tst.w   v_dead(a5)
+        bne     .st
+        move.w  v_keys(a5),v_pkeys(a5) ; no second jump edge
+        bsr     game_step
+        endc
+.st
         ifne    DEBUG
         bsr     dbg_lag
         endc
@@ -1215,7 +1228,14 @@ mainloop:
         beq     roundclear
         bra     mainloop
 
-pause:                          ; ENTER pauses, ENTER again continues
+game_step:                      ; one step of game logic (25 Hz)
+        bsr     update_jack
+        bsr     update_enemies
+        bsr     update_bonus
+        bsr     check_bombs
+        bra     check_life
+
+pause:                        ; ENTER pauses, ENTER again continues
         movem.l d0-d7/a0-a3,-(sp)
         lea     s_pause(pc),a1
         moveq   #100,d4
@@ -3078,22 +3098,35 @@ check_hits:                     ; Jack vs enemies (shrunk boxes)
         moveq   #MAXEN-1,d7
 .l      tst.w   s_act(a0)
         beq     .n
-        cmp.w   #3,s_type(a0)   ; explosions are harmless
+        move.w  s_type(a0),d1
+        cmp.w   #3,d1           ; explosions are harmless
         beq     .n
-        move.w  s_x(a0),d0
+        LEAX    hitwin,a2       ; per type: dx_min,dx_max,dy_min,dy_max (gfx.py)
+        add.w   d1,d1
+        add.w   d1,d1
+        add.w   d1,a2
+        move.w  s_x(a0),d0      ; dx = enemy - Jack in pixels
         asr.w   #4,d0
         sub.w   d2,d0
-        bpl     .a
-        neg.w   d0
-.a      cmp.w   #8,d0
-        bge     .n
-        move.w  s_y(a0),d0
+        move.b  (a2)+,d1
+        ext.w   d1
+        cmp.w   d1,d0
+        blt     .n
+        move.b  (a2)+,d1
+        ext.w   d1
+        cmp.w   d1,d0
+        bgt     .n
+        move.w  s_y(a0),d0      ; dy = enemy - Jack
         asr.w   #4,d0
         sub.w   d3,d0
-        bpl     .b
-        neg.w   d0
-.b      cmp.w   #11,d0
-        bge     .n
+        move.b  (a2)+,d1
+        ext.w   d1
+        cmp.w   d1,d0
+        blt     .n
+        move.b  (a2)+,d1
+        ext.w   d1
+        cmp.w   d1,d0
+        bgt     .n
         tst.w   v_freeze(a5)
         bne     .c
         tst.w   v_inv(a5)       ; still protected

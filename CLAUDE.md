@@ -63,6 +63,7 @@ Bitte nachziehen; aktuell steht dort 90112.
 ```
 export TOOLCHAIN=~/toolchain          # emu.sh sucht sonst in ./toolchain
 ./tools/emu.sh [-DSCHALTER=wert ...]   # baut src/fuse.asm mit vasm, startet sQLux auf Xvfb :9
+EMUSPEED=0.6 EMUNTSC=1 ./tools/emu.sh   # langsamerer Core (Anteil vom QL-Takt) bzw. 60-Hz-Timing nachstellen
 ./tools/key.sh space 0.2               # Taste halten (xdotool-Namen: Up Down Left Right space Return Escape F1..F5 a..z)
 ./tools/shot.sh name                   # Screenshot -> emu/shots/name.png, dann mit Read ansehen
 python3 tools/sound_notes.py           # Töne aus emu/sound.raw (SDL-"disk"-Audio) per FFT auflisten
@@ -82,6 +83,7 @@ Test-Schalter für vasm (`-D...`, alle mit `ifd`/`ifnd` geschützt):
 | `FEWBOMBS=n` | nur die ersten n Bomben, für schnelles Rundenende |
 | `NOENEMY` | keine Gegner |
 | `BONUSTEST=n` | Bonus erscheint nach 4 s auf Jack (Einerstelle = Typ 0 Leben, 1 Frost, 2 Explosion; 10..12 = Bonus fliegt frei) |
+| `CATCHUP=0` | Nachholschritt bei Verzögerung abschalten (zum Vergleich; Standard 1) |
 | `CATCHTEST` | zusammen mit `BONUSTEST=1` (Frost): ein Sucher erscheint neben Jack, um das Fangen eingefrorener Gegner zu testen |
 
 Nach Änderungen an der Physik zusätzlich `python3 levels.py` laufen lassen. `preview.py` zeigt die Level als PNG.
@@ -97,10 +99,18 @@ Nach Änderungen an der Physik zusätzlich `python3 levels.py` laufen lassen. `p
 - **Mode-8-Pixel:** Ein Wort enthält 4 Pixel; für Pixel p: G = Bit 15-2p, Flash = 14-2p, R = 7-2p, B = 6-2p.
   Farben: K0 B1 R2 M3 G4 C5 Y6 W7. Der Bildschirm liegt bei $20000, 128 Byte pro Zeile.
 - **Tabellen in gfx.inc** (feste Reihenfolge, der Code nutzt Offsets): clrmask, pixtab, fullw, lmask, rmask, pattab.
+  Ganz am Ende steht `hitwin`; neue Tabellen nur dort anhängen.
 - **Sprites:** 12×16 Pixel, 4 vorgeschobene Varianten. Jede hat 16 Zeilen × 4 Wörter × (Maske, Daten), also 256 Byte; ein Bild belegt 1 KB.
   Jack: Index = Bild×2 + Richtung.
 - **Render:** Sprites werden nach y sortiert, jedes einzeln gelöscht und neu gezeichnet; Überlappungen werden repariert.
   `bomb_refresh` läuft vor `render`. Sprite-Slots: Jack, MAXEN=6 Gegner, ein Bonus-Slot (Typ 4).
+- **Hauptschleife:** render → readkeys → `check_hits` → `game_step` (update_jack, update_enemies, update_bonus, check_bombs, check_life).
+  `check_hits` prüft also die Positionen, die gerade auf dem Schirm stehen, nicht die frisch berechneten (sonst Tod trotz sichtbarer Lücke).
+  Dauerte eine Schleife länger als LOOPF Frames (`v_lag`), läuft `game_step` einmal zusätzlich ohne Render (CATCHUP), höchstens einmal.
+  Im Emulator bleibt die Lag-Ziffer selbst bei EMUSPEED=0.6 mit 6 Gegnern bei 2, erst bei 0.3 greift der Ausgleich.
+- **Trefferfenster** `hitwin` (gfx.py → gfx.inc): je Gegnertyp dx_min,dx_max,dy_min,dy_max (Gegner − Jack, Pixel), berechnet aus den sichtbaren
+  Sprite-Boxen minus HITM=1 px je Seite und auf das alte Fenster (|dx|<8, |dy|<11) begrenzt. Gilt auch für das Fangen eingefrorener Gegner.
+  Wer Sprites ändert, bekommt die Fenster automatisch neu; make.sh gibt sie aus.
 - **Gegnertypen:** 1 Läufer (wird am Boden zum Flieger), 2 Sucher, 3 Explosion, 5 Hüpfer (ab Runde 5).
 - **Physik** in 1/16 Pixel: WALKV 32, JUMPV 190, GRAV 8, SHORTV 40, GLIDEV 14, MAXFALL 96, FASTV 64.
   `body_move` prüft die Kollision mit Plattformen entlang des ganzen Bewegungswegs.
@@ -187,6 +197,8 @@ Nach Änderungen an der Physik zusätzlich `python3 levels.py` laufen lassen. `p
 ## Ideen und offene Punkte
 
 - Wirkung der Flacker-Reduktion auf echter Hardware oder dem MiSTer bestätigen
+- Forum-Feedback QLCore (Spectrum Next): Bewegung „nicht die flüssigste“. Verzögerung ist laut Emulator unwahrscheinlich;
+  bei 60-Hz-Timing läuft das Spiel 20 % schneller. Rückmeldung zur Lag-Ziffer (DEBUG-Build) und Bildfrequenz der Next abwarten
 - weitere Runden und Hintergründe; das Budget für den Speicher im Auge behalten
 - Gegner-Verhalten in Runde 9+ (zweiter Durchlauf) feinjustieren
 - Musik während des Spiels ist bewusst weggelassen: der QL hat nur einen Tonkanal, und Effekte haben Vorrang

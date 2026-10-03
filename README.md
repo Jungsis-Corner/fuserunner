@@ -29,7 +29,7 @@ wer die brennenden Bomben der Reihe nach erwischt, bekommt am Rundenende Bonuspu
 Die fertigen Spieldateien gibt es unter **[Releases](https://github.com/Jungsis-Corner/fuserunner/releases/latest)**:
 
 - `fuserunner.win` – QXL.WIN-Image mit BOOT und Spiel für MiSTer, QPC2, Q-emuLator und QL-SD
-- `fuserunner-v1.0.zip` – alle Spieldateien inklusive Anleitung (`LIESMICH_README.txt`)
+- `fuserunner-v1.1.zip` (one ZIP per version) – alle Spieldateien inklusive Anleitung (`LIESMICH_README.txt`)
 
 Die ausführliche Anleitung zum Starten (auch auf dem MiSTer), zur Steuerung und zu den Spielregeln
 steht in [LIESMICH_README.txt](LIESMICH_README.txt).
@@ -63,7 +63,7 @@ catch the lit bombs in order for a bonus at the end of the round.
 Get the ready-to-play files from **[Releases](https://github.com/Jungsis-Corner/fuserunner/releases/latest)**:
 
 - `fuserunner.win` – QXL.WIN image with BOOT and game for MiSTer, QPC2, Q-emuLator and QL-SD
-- `fuserunner-v1.0.zip` – all game files including the manual (`LIESMICH_README.txt`)
+- `fuserunner-v1.1.zip` (one ZIP per version) – all game files including the manual (`LIESMICH_README.txt`)
 
 How to start the game (including MiSTer), controls and rules are described in
 [LIESMICH_README.txt](LIESMICH_README.txt) (English part below the German one).
