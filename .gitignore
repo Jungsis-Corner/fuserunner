@@ -1,0 +1,12 @@
+toolchain/
+emu/
+__pycache__/
+src/*.inc
+src/fuse_bin
+src/fuserunner
+src/fuse_scr
+src/splash.png
+src/INSTALL_bas
+src/LOADER_bas
+src/boot
+src/fuserunner.win

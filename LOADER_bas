@@ -1,0 +1,4 @@
+10 REMark FUSE RUNNER - Start per CALL / start via CALL (no file header needed)
+20 a=RESPR(86016)
+30 LBYTES win1_fuse_bin,a
+40 CALL a+20

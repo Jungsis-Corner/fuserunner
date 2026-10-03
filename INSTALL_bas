@@ -1,0 +1,7 @@
+10 REMark FUSE RUNNER - create job file with QDOS header and run it
+20 REMark Laufwerk anpassen / change the drive: mdv1_ flp1_ win1_ dos1_
+30 d$="win1_"
+40 a=RESPR(86016)
+50 LBYTES d$&"fuse_bin",a
+60 SEXEC d$&"fuserunner_exe",a,85992,4096
+70 EXEC_W d$&"fuserunner_exe"
