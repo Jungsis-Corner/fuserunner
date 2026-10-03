@@ -14,7 +14,7 @@ Das Projekt liegt unter `~/fuserunner` (WSL), die Werkzeugkette unter `~/toolcha
 ```
 src/fuse.asm        Hauptquelltext (~3700 Zeilen), bindet am Ende die *.inc-Dateien ein
 src/gfx.py          Sprites + Pixel/Masken-Tabellen      -> gfx.inc
-src/backdrops.py    8 Hintergründe als Bytecode         -> bgdata.inc
+src/backdrops.py    9 Hintergründe als Bytecode         -> bgdata.inc
 src/levels.py       Leveldaten + Erreichbarkeitsprüfung -> levels.inc
 src/music.py        Melodien                            -> music.inc
 src/splash.py       Ladebildschirm                      -> fuse_scr (roh, 32K) + splash.inc (RLE) + splash.png
@@ -56,7 +56,7 @@ make.sh startet der Reihe nach gfx.py, backdrops.py, music.py, splash.py und lev
 **levels.py bricht den Build ab, wenn eine Bombe unerreichbar ist.** In diesem Fall die Level reparieren und die Prüfung nicht abschwächen.
 
 Wenn die Binärgröße sich ändert, ändert sich auch die RESPR-Zahl in LIESMICH_README.txt (CALL-Zeile, DE und EN).
-Bitte nachziehen; aktuell steht dort 86016.
+Bitte nachziehen; aktuell steht dort 90112.
 
 ## Testen (ohne echten QL)
 
@@ -117,7 +117,7 @@ Nach Änderungen an der Physik zusätzlich `python3 levels.py` laufen lassen. `p
   | `255` | Ende |
 
   `col` = Farbe | Muster<<3. Muster: 0 voll, 1 Schach, 2 Punkte, 3 H-Linien, 4 Fenstergitter, 5 Ziegel, 6 V-Linien, 7 Punkte 12,5 %.
-  Alle 8 Hintergründe zusammen sind etwa 25 KB groß. Wird es mehr, leidet der Speicherbedarf und die Ladezeit pro Level (2–3,5 s).
+  Alle 9 Hintergründe zusammen sind etwa 28 KB groß. Wird es mehr, leidet der Speicherbedarf und die Ladezeit pro Level (2–3,5 s).
 - **Level-Deskriptor** (levels.inc): Typ, Start x/y, Offsets für Plattformen, Bomben, Spawn und Hintergrund, Mond x/y (0 = kein Mond), 4 Ziegelfarben.
   Bomben: x muss ein Vielfaches von 4 sein, höchstens 24 (MAXBOMB).
 - **Musik** (music.inc): Paare aus Tonhöhe und Frames; Tonhöhe 0 = Pause, `254,0` = Schleife, `255,0` = Stopp.

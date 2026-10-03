@@ -690,9 +690,101 @@ def arctic():
     return bd
 
 
+CX, CTOP = 128, 92          # crater centre / rim height
+
+
+def vcone(x):
+    d = abs(x - CX)
+    if d < 14:
+        return CTOP + 3 - 3 * math.cos(d / 14 * math.pi) * 0.5   # shallow crater dip
+    t = (d - 14) / 100.0
+    return CTOP + 150 * t ** 0.85 + 2 * math.sin(x / 5.0)
+
+
+def stream_cols(bd, path, w, c):
+    """lava stream along path(y)->x, drawn as vertical runs (2 bytes/column)"""
+    ys = range(CTOP + 2, YB)
+    pts = [(path(y), y) for y in ys]
+    xs = {}
+    for x, y in pts:
+        if y < vcone(int(x)) + 1:
+            continue
+        for xx in range(int(round(x - w / 2)), int(round(x + w / 2)) + 1):
+            lo, hi = xs.get(xx, (y, y))
+            xs[xx] = (min(lo, y), max(hi, y))
+    if not xs:
+        return
+    x0, x1 = min(xs), max(xs)
+    runs = [(xs[x][0], xs[x][1] - xs[x][0] + 1) if x in xs else (YT, 0) for x in range(x0, x1 + 1)]
+    bd.cols(x0, runs, c)
+
+
+def volcano():
+    rnd = random.Random(9)
+    bd = Backdrop()
+    # dark red sky, denser towards the horizon
+    bd.band(YT, 150, P(R, DOTS8))
+    bd.band(150, YB, P(R, DOTS))
+    # ash plume above the crater, drifting to the right (column runs)
+    def plume(x, k):
+        t = (x - (CX - 10)) / 70.0               # 0 at the crater .. 1 far right
+        if not 0 <= t <= 1:
+            return (YT, 0)
+        mid = CTOP - 8 - 58 * t ** 0.7 + 3 * math.sin(x / 4.0)
+        hw = (6 + 14 * t) * k * (1 - 0.6 * t ** 3) + 1.5 * math.sin(x / 3.0)
+        return (mid - hw, 2 * hw)
+    bd.cols(CX - 10, [plume(x, 1.0) for x in range(CX - 10, CX + 61)], P(M, CHECK))
+    bd.cols(CX - 6, [plume(x, 0.55) for x in range(CX - 6, CX + 61)], P(W, DOTS8))
+    # crater glow
+    bd.ellipse(CX, CTOP + 2, 9, P(Y, CHECK), rx=18)
+    # the volcano
+    bd.layer()
+    bd.profile(vcone, P(K), edge=P(M))
+    bd.profile(vcone, P(B, DOTS))
+    shade = [(vcone(x) + 3, YB - vcone(x)) for x in range(CX + 16, 230)]
+    bd.cols(CX + 16, shade, P(M, DOTS8))
+    bd.hline(CX - 13, CX + 13, CTOP + 1, P(Y))
+    bd.hline(CX - 10, CX + 10, CTOP + 2, P(R))
+    # lava streams: red bed, yellow core
+    bd.layer()
+    streams = [
+        (lambda y: CX - 8 - (y - CTOP) * 0.55 + 4 * math.sin(y / 11.0), 4),
+        (lambda y: CX - 2 - (y - CTOP) * 0.18 + 3 * math.sin(y / 8.0 + 1), 3),
+        (lambda y: CX + 6 + (y - CTOP) * 0.30 + 5 * math.sin(y / 13.0 + 2), 4),
+        (lambda y: CX + 10 + (y - CTOP) * 0.75 + 3 * math.sin(y / 9.0), 3),
+    ]
+    for f, w in streams:
+        stream_cols(bd, f, w + 2, P(R))
+    for f, w in streams:
+        stream_cols(bd, f, w - 2, P(Y))
+    # glowing spatters around the crater
+    for _ in range(10):
+        a = rnd.uniform(-2.4, -0.7)
+        r = rnd.uniform(14, 34)
+        bd.px(CX + math.cos(a) * r * 1.3, CTOP + math.sin(a) * r, P(Y))
+    # foreground rocks
+    bd.layer()
+    boulders = [(22, 206, 20), (236, 210, 16), (164, 228, 12)]   # cx, top, half width
+    def rock(x):
+        y = YB - 14 - 8 * abs(math.sin(x / 17.0)) - 4 * abs(math.sin(x / 6.0 + 1)) - rnd.randint(0, 1)
+        for bx, by, hw in boulders:
+            if abs(x - bx) < hw:
+                y = min(y, by + (abs(x - bx) / hw) ** 2 * (YB - 12 - by))
+        return y
+    rocks = [rock(x) for x in range(256)]
+    bd.profile(lambda x: rocks[x], P(K), edge=P(R))
+    bd.profile(lambda x: rocks[x] + 2, P(M, DOTS))
+    # lava pools between the rocks
+    for x0, w in [(60, 18), (110, 14), (190, 16)]:
+        bd.rect(x0, 244, w, 3, P(R))
+        bd.hline(x0 + 2, x0 + w - 3, 244, P(Y))
+    return bd
+
+
 BACKDROPS = [("bg_city", city), ("bg_mountains", mountains), ("bg_desert", desert),
              ("bg_harbour", harbour), ("bg_castle", castle), ("bg_forest", forest),
-             ("bg_moon", moonbase), ("bg_arctic", arctic)]
+             ("bg_moon", moonbase), ("bg_arctic", arctic),
+             ("bg_volcano", volcano)]
 
 
 def emit(f, label, bd):

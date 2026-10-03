@@ -3531,6 +3531,7 @@ lvlnames:
         LQ      'DER WALD','THE FOREST'
         LQ      'DIE MONDBASIS','THE MOON BASE'
         LQ      'DIE ARKTIS','THE ARCTIC'
+        LQ      'DER VULKAN','THE VOLCANO'
 
 mn_items:
         LQ      'SPIEL STARTEN','START GAME'

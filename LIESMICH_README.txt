@@ -37,7 +37,7 @@ STARTEN
   Fehlt der Datei nach dem Kopieren vom PC der QDOS-Header, meldet EXEC
   "bad parameter". Dann INSTALL_bas einmal starten (Laufwerk in Zeile 30
   anpassen) oder per CALL starten:
-      a=RESPR(86016):LBYTES win1_fuse_bin,a:CALL a+20
+      a=RESPR(90112):LBYTES win1_fuse_bin,a:CALL a+20
 
 STEUERUNG
   Tastatur:  Cursortasten + Leertaste, ENTER = Pause, ESC = Menue
@@ -83,9 +83,9 @@ SPIELREGELN
     Stern         alle Gegner explodieren
   Extraleben alle 20000 Punkte (bis 9 Leben). Nach einem verlorenen
   Leben ist Jack 3 Sekunden geschuetzt (er blinkt).
-  Acht Runden: Stadt, Berge, Wueste, Hafen, Burg, Wald, Mondbasis (ganz
-  ohne Plattformen), Arktis - danach von vorn, schneller und mit mehr
-  Gegnern.
+  Neun Runden: Stadt, Berge, Wueste, Hafen, Burg, Wald, Mondbasis (ganz
+  ohne Plattformen), Arktis, Vulkan - danach von vorn, schneller und mit
+  mehr Gegnern.
 
 HIGHSCORES
   Die Top 10, Sprache, Schwierigkeit und Musik werden in der Datei fuse_hi
@@ -144,7 +144,7 @@ RUNNING
   If the QDOS header got lost while copying from a PC, EXEC reports
   "bad parameter". Run INSTALL_bas once (change the drive in line 30) or
   start via CALL:
-      a=RESPR(86016):LBYTES win1_fuse_bin,a:CALL a+20
+      a=RESPR(90112):LBYTES win1_fuse_bin,a:CALL a+20
 
 CONTROLS
   Keyboard:  cursor keys + space, ENTER = pause, ESC = menu
@@ -188,8 +188,9 @@ HOW TO PLAY
     Star       all enemies explode
   Extra life every 20000 points (up to 9). After losing a life Jack is
   protected for 3 seconds (he blinks).
-  Eight rounds: city, mountains, desert, harbour, castle, forest, moon base
-  (no platforms at all), arctic - then again, faster and with more enemies.
+  Nine rounds: city, mountains, desert, harbour, castle, forest, moon base
+  (no platforms at all), arctic, volcano - then again, faster and with more
+  enemies.
 
 HIGH SCORES
   The top 10, language, difficulty and music setting are saved in the file fuse_hi
