@@ -197,8 +197,8 @@ Nach Änderungen an der Physik zusätzlich `python3 levels.py` laufen lassen. `p
 ## Ideen und offene Punkte
 
 - Wirkung der Flacker-Reduktion auf echter Hardware oder dem MiSTer bestätigen
-- Forum-Feedback QLCore (Spectrum Next): Bewegung „nicht die flüssigste“. Verzögerung ist laut Emulator unwahrscheinlich;
-  bei 60-Hz-Timing läuft das Spiel 20 % schneller. Rückmeldung zur Lag-Ziffer (DEBUG-Build) und Bildfrequenz der Next abwarten
+- Erledigt (Okt. 2026): Forum-Feedback QLCore (Spectrum Next/N-GO): Bewegung „nicht die flüssigste“. Mit v1.1 laut Tester
+  flüssiger; N-GO läuft mit 50 Hz, Lag-Ziffer im DEBUG-Build immer 2. Offen nur: bei 60-Hz-Timing (NTSC) läuft das Spiel 20 % schneller
 - weitere Runden und Hintergründe; das Budget für den Speicher im Auge behalten
 - Gegner-Verhalten in Runde 9+ (zweiter Durchlauf) feinjustieren
 - Musik während des Spiels ist bewusst weggelassen: der QL hat nur einen Tonkanal, und Effekte haben Vorrang
