@@ -8,6 +8,7 @@ RAM auf 640K stellen). Laeuft mit stabilen 25 Bildern/s auf einem QL
 mit Original-Geschwindigkeit.
 
 Idee: Jungsi - Code: Claude und Jungsi - www.jungsi.de
+Download: https://jungsi.itch.io/fuserunner
 
 DATEIEN
   fuserunner.win  QL-SD/QXL.WIN-Image mit BOOT und Spiel (MiSTer, QPC2,
@@ -116,6 +117,7 @@ Needs a QL with memory expansion (256K or more; on MiSTer set RAM to
 640K). Runs at a steady 25 frames per second at original QL speed.
 
 Idea: Jungsi - Code: Claude and Jungsi - www.jungsi.de
+Download: https://jungsi.itch.io/fuserunner
 
 FILES
   fuserunner.win  QL-SD/QXL.WIN image with BOOT and game (MiSTer, QPC2,

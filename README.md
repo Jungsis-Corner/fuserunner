@@ -26,7 +26,8 @@ wer die brennenden Bomben der Reihe nach erwischt, bekommt am Rundenende Bonuspu
 
 ### Download
 
-Die fertigen Spieldateien gibt es unter **[Releases](https://github.com/Jungsis-Corner/fuserunner/releases/latest)**:
+Die fertigen Spieldateien gibt es unter **[Releases](https://github.com/Jungsis-Corner/fuserunner/releases/latest)**
+und auf **[itch.io](https://jungsi.itch.io/fuserunner)**:
 
 - `fuserunner.win` – QXL.WIN-Image mit BOOT und Spiel für MiSTer, QPC2, Q-emuLator und QL-SD
 - `fuserunner-v1.1.zip` (je Version eine eigene ZIP-Datei) – alle Spieldateien inklusive Anleitung (`LIESMICH_README.txt`)
@@ -60,7 +61,8 @@ catch the lit bombs in order for a bonus at the end of the round.
 
 ### Download
 
-Get the ready-to-play files from **[Releases](https://github.com/Jungsis-Corner/fuserunner/releases/latest)**:
+Get the ready-to-play files from **[Releases](https://github.com/Jungsis-Corner/fuserunner/releases/latest)**
+or on **[itch.io](https://jungsi.itch.io/fuserunner)**:
 
 - `fuserunner.win` – QXL.WIN image with BOOT and game for MiSTer, QPC2, Q-emuLator and QL-SD
 - `fuserunner-v1.1.zip` (one ZIP per version) – all game files including the manual (`LIESMICH_README.txt`)
