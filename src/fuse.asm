@@ -8,6 +8,34 @@
 ;
 ; The code is position independent (PIC): all variables live in a
 ; heap block allocated with MT.ALCHP, base register A5.
+;
+; How the program is built (in the order of this file):
+;   start      allocate the heap (variables + 32K background buffer),
+;              Mode 8, 50 Hz poll routine, HUD and message windows
+;   menu       title page, menu, attract mode (high scores, credits)
+;   pages      loading screen, help, credits, high score table,
+;              name entry
+;   game       newgame -> newround (build the level) -> mainloop:
+;                render         draw the sprites at their positions
+;                readkeys       joystick / cursor keys
+;                check_hits     Jack against the enemies just drawn
+;                game_step      move Jack, enemies, bonus; collect
+;                               bombs; new enemies (25 times a second)
+;              then roundclear (bonus, next round) or died (lives,
+;              game over, high score entry)
+;   drawing    backdrops (bytecode from backdrops.py), bricks,
+;              platforms, bombs, sprites (pre-shifted, masked)
+;   sound      IPC beeps for effects, music_tick for the tunes
+;   data       texts (German/English pairs), tables, and at the end
+;              the generated *.inc files (graphics, levels, music)
+;
+; Coordinates: actors use 1/16 pixel (s_x, s_y); x is in Mode 8
+; pixels (0..255), y in screen lines. A sprite position is its top
+; left corner.
+;
+; Routine headers: "d4 = entry" names the input registers, "-> a1 =
+; ..." the results; "-> EQ = saved" means the Z flag is set in that
+; case. A5 always points to the variables.
 ;=====================================================================
 
     ifnd DEBUG
@@ -120,41 +148,41 @@ b_save  rs.l    8               ; background below (2 words x 8 lines)
 b_size  rs.b    0
 
         rsreset                 ; global variables (A5)
-v_heap  rs.l    1
+v_heap  rs.l    1               ; the heap block itself (for MT.RECHP)
 v_bg    rs.l    1               ; background buffer (32K, screen layout)
-v_sp    rs.l    1
+v_sp    rs.l    1               ; stack pointer at the start (for leave)
 v_mode  rs.w    1               ; 0 = Job, 1 = CALL
-v_last  rs.w    1
+v_last  rs.w    1               ; poll counter at the end of the last loop
 v_poll  rs.l    2               ; poll list linkage
-v_hud   rs.l    1
-v_msg   rs.l    1
-v_keys  rs.w    1
-v_pkeys rs.w    1
+v_hud   rs.l    1               ; channel: HUD window (top line)
+v_msg   rs.l    1               ; channel: message window
+v_keys  rs.w    1               ; keys held now (K_... bits)
+v_pkeys rs.w    1               ; keys held in the loop before
 v_score rs.l    1               ; BCD
-v_ptsb  rs.l    1
+v_ptsb  rs.l    1               ; BCD scratch: points to add (abcd)
 v_lives rs.w    1
-v_round rs.w    1
-v_hudd  rs.w    1
-v_rand  rs.l    1
-v_plat  rs.l    1
+v_round rs.w    1               ; 1, 2, ...
+v_hudd  rs.w    1               ; 1 = HUD needs a redraw
+v_rand  rs.l    1               ; random generator state
+v_plat  rs.l    1               ; platform table of this level
 v_spwt  rs.l    1               ; spawn table
-v_nb    rs.w    1
-v_bleft rs.w    1
-v_lit   rs.w    1
-v_flash rs.w    1
-v_spawn rs.w    1
-v_spwi  rs.w    1
-v_spwin rs.w    1
-v_maxen rs.w    1
-v_espd  rs.w    1
-v_dead  rs.w    1
-v_lag   rs.w    1
-v_lagmx rs.w    1
-v_dbgc  rs.w    1
-v_dbgs  rs.w    1
-v_jsx   rs.w    1
+v_nb    rs.w    1               ; number of bombs in this level
+v_bleft rs.w    1               ; bombs still there
+v_lit   rs.w    1               ; index of the lit bomb (-1 none)
+v_flash rs.w    1               ; blink counter of the lit bomb
+v_spawn rs.w    1               ; loops until the next enemy comes
+v_spwi  rs.w    1               ; next entry of the spawn table
+v_spwin rs.w    1               ; spawn interval in loops
+v_maxen rs.w    1               ; enemies at the same time (this round)
+v_espd  rs.w    1               ; enemy speed (this round)
+v_dead  rs.w    1               ; 1 = Jack was hit
+v_lag   rs.w    1               ; frames the last loop took
+v_lagmx rs.w    1               ; DEBUG: most frames per loop
+v_dbgc  rs.w    1               ; DEBUG: loops until the next HUD update
+v_dbgs  rs.w    1               ; DEBUG: 1 = skip one measurement (HUD)
+v_jsx   rs.w    1               ; Jack's start position (1/16 px)
 v_jsy   rs.w    1
-v_moonx rs.w    1
+v_moonx rs.w    1               ; moon position (0 = no moon)
 v_moony rs.w    1
 v_bc0   rs.w    1               ; brick colours: top, main, mortar, joint
 v_bc1   rs.w    1
@@ -219,6 +247,10 @@ qe\@
         dc.w    10
         dc.b    'FuseRunner'
         even
+;---------------------------------------------------------------------
+; Start (Job or CALL): d7 = 0 for EXEC, 1 for CALL (then the BASIC
+; registers are saved and restored in leave)
+;---------------------------------------------------------------------
 callentry:                      ; offset 20: entry point for CALL
         movem.l d1-d7/a0-a6,-(sp)
         moveq   #1,d7
@@ -226,15 +258,15 @@ callentry:                      ; offset 20: entry point for CALL
 jobentry:
         moveq   #0,d7
 common:
-        move.l  sp,a4
+        move.l  sp,a4           ; heap: variables + 32K background buffer
         moveq   #MT_ALCHP,d0
         move.l  #v_size+32768,d1
         moveq   #-1,d2
         trap    #1
         tst.l   d0
         bne     leave
-        move.l  a0,a5
-        move.l  a5,a1
+        move.l  a0,a5           ; A5 = variables from here on
+        move.l  a5,a1           ; all variables 0
         move.w  #v_size/2-1,d0
 .clr    clr.w   (a1)+
         dbra    d0,.clr
@@ -266,7 +298,7 @@ common:
         moveq   #MT_LPOLL,d0
         trap    #1
 
-        lea     hudname(pc),a0
+        lea     hudname(pc),a0  ; the two text windows
         bsr     opench
         move.l  a0,v_hud(a5)
         lea     msgname(pc),a0
@@ -283,6 +315,10 @@ common:
 ;=====================================================================
 ; Menu (joystick / cursor keys + space)
 ;=====================================================================
+; The menu entries (v_sel): 0 start, 1 help, 2 high scores,
+; 3 difficulty, 4 music, 5 language, 6 credits, 7 quit.
+; After 20 s without a key the attract mode shows the high scores and
+; the credits.
 menu:
         move.w  #-1,v_newhi(a5)
         LEAX    mus_title,a0    ; title music (unless it is already playing)
@@ -304,14 +340,14 @@ menu:
         clr.w   v_idle(a5)
         bsr     menu_marker
         bsr     keys_release
-.loop   bsr     frame1
+.loop   bsr     frame1          ; one frame (1/50 s) per pass
         bsr     readkeys
         move.w  v_pkeys(a5),d1
         not.w   d1
         and.w   d0,d1           ; d1 = newly pressed
         addq.w  #1,v_idle(a5)
-        btst    #K_UP,d1
-        beq.s   .nu
+        btst    #K_UP,d1        ; up/down: next entry (wraps around),
+        beq.s   .nu             ; d4 = the old one to redraw
         move.w  v_sel(a5),d4
         subq.w  #1,v_sel(a5)
         bpl.s   .mv
@@ -332,8 +368,8 @@ menu:
         bra.s   .loop
 .nd     btst    #K_ESC,d1
         bne     exit_prog
-        and.w   #(1<<K_SPACE)|(1<<K_ENTER)|(1<<K_RIGHT),d1
-        bne.s   .sel
+        and.w   #(1<<K_SPACE)|(1<<K_ENTER)|(1<<K_RIGHT),d1 ; select (right:
+        bne.s   .sel            ; MiSTer pads have only the cross)
         move.w  v_idle(a5),d0
         and.w   #7,d0
         bne.s   .na
@@ -349,7 +385,7 @@ menu:
         move.w  #50*10,d7
         bsr     waitkey
         bra     menu
-.sel    move.w  v_sel(a5),d0
+.sel    move.w  v_sel(a5),d0    ; the selected entry, see the list above
         beq     newgame
         subq.w  #1,d0
         bne.s   .s2
@@ -387,7 +423,7 @@ menu_item:                      ; d4 = entry: print it (yellow if selected)
         lea     mn_items(pc),a1
         move.w  d4,d0
         bsr     pair_n
-        cmp.w   #3,d4
+        cmp.w   #3,d4           ; difficulty and music show their setting
         bne.s   .nd
         tst.w   v_diff(a5)
         beq.s   .ne
@@ -399,11 +435,11 @@ menu_item:                      ; d4 = entry: print it (yellow if selected)
         beq.s   .ne
         lea     mn_moff(pc),a1
 .ne
-        moveq   #5,d5
+        moveq   #5,d5           ; ink: cyan, or yellow if selected
         cmp.w   v_sel(a5),d4
         bne.s   .c
         moveq   #6,d5
-.c      move.w  d4,d0
+.c      move.w  d4,d0           ; y = 90 + 15 * entry
         mulu    #15,d0
         add.w   #90,d0
         move.w  d0,d4
@@ -414,7 +450,7 @@ menu_item:                      ; d4 = entry: print it (yellow if selected)
 
 menu_marker:                    ; Jack walks next to the selected entry
         movem.l d0-d7/a0-a3,-(sp)
-        lea     BONUSSPR(a5),a0
+        lea     BONUSSPR(a5),a0 ; (drawn with the bonus sprite slot)
         bsr     erase_spr
         move.w  #44<<4,s_x(a0)
         move.w  v_sel(a5),d0
@@ -435,8 +471,8 @@ menu_marker:                    ; Jack walks next to the selected entry
         movem.l (sp)+,d0-d7/a0-a3
         rts
 
-menu_hiline:                    ; "HIGHSCORE 012345 NAME"
-        lea     v_str(a5),a0
+menu_hiline:                    ; "HIGHSCORE 012345 NAME" (the best one)
+        lea     v_str(a5),a0    ; built in v_str: length word, text
         lea     mn_hi(pc),a1
         bsr     lstr
         move.w  (a1)+,d1
@@ -444,7 +480,7 @@ menu_hiline:                    ; "HIGHSCORE 012345 NAME"
         subq.w  #1,d1
 .c      move.b  (a1)+,(a0)+
         dbra    d1,.c
-        lea     v_hs(a5),a1
+        lea     v_hs(a5),a1     ; entry 1: score, name
         bsr     put_score
         move.b  #' ',(a0)+
         lea     6(a1),a2
@@ -452,7 +488,7 @@ menu_hiline:                    ; "HIGHSCORE 012345 NAME"
 .n      move.b  (a2)+,(a0)+
         dbra    d1,.n
         bsr     str_close
-        lea     v_str(a5),a1
+        lea     v_str(a5),a1    ; white, line 66
         moveq   #66,d4
         moveq   #7,d5
         moveq   #0,d6
@@ -463,7 +499,7 @@ menu_hiline:                    ; "HIGHSCORE 012345 NAME"
 ;---------------------------------------------------------------------
 SPL_Y   equ     220             ; screen line of the "press a key" text
 
-splash_show:
+splash_show:                    ; (the picture is also the title backdrop)
         move.l  v_bg(a5),a1     ; unpack into the background buffer
         move.l  a1,a3
         add.l   #32768,a3
@@ -490,8 +526,8 @@ splash_show:
         bsr     music_play
         bsr     keys_release
         clr.w   v_idle(a5)
-.l      bsr     frame1
-        move.w  v_idle(a5),d0
+.l      bsr     frame1          ; wait for a key; every 32 frames the
+        move.w  v_idle(a5),d0   ; "press a key" text changes
         and.w   #31,d0
         bne.s   .k
         btst    #5,v_idle+1(a5) ; blink: text on / picture back
@@ -517,7 +553,7 @@ splash_show:
 ;---------------------------------------------------------------------
 ; Pages
 ;---------------------------------------------------------------------
-page_clear:
+page_clear:                     ; empty page with a brick frame (menu pages)
         bsr     cls_all
         lea     BONUSSPR(a5),a0
         clr.w   s_drawn(a0)
@@ -545,7 +581,7 @@ page_clear:
         movem.l (sp)+,d0-d7/a4
         rts
 
-page_help:
+page_help:                      ; how to play, with the three bonus icons
         bsr     page_clear
         lea     pg_help(pc),a2
         bsr     print_table
@@ -570,7 +606,7 @@ page_help:
         clr.w   s_drawn(a0)
         rts
 
-page_credits:
+page_credits:                   ; credits, with Jack and three enemies
         bsr     page_clear
         lea     pg_cred(pc),a2
         bsr     print_table
@@ -596,11 +632,11 @@ page_credits:
         clr.w   s_drawn(a0)
         rts
 
-page_scores:
+page_scores:                    ; the high score table (v_newhi in green)
         bsr     page_clear
         lea     pg_scores(pc),a2
         bsr     print_table
-        moveq   #0,d4
+        moveq   #0,d4           ; d4 = entry 0..HSN-1
 .l      bsr     hs_line
         moveq   #7,d5
         cmp.w   #3,d4
@@ -609,7 +645,7 @@ page_scores:
 .w      cmp.w   v_newhi(a5),d4
         bne.s   .p
         moveq   #4,d5           ; the new entry in green
-.p      move.w  d4,d0
+.p      move.w  d4,d0           ; y = 52 + 15 * entry
         mulu    #15,d0
         add.w   #52,d0
         move.l  d4,-(sp)
@@ -625,14 +661,14 @@ page_scores:
 
 hs_line:                        ; d4 = entry -> v_str "01  012345  NAME        R05"
         movem.l d0-d2/a0-a2,-(sp)
-        lea     v_str+2(a5),a0
+        lea     v_str+2(a5),a0  ; place 01..10
         moveq   #0,d0
         move.w  d4,d0
         addq.w  #1,d0
         bsr     put_2dig
         move.b  #' ',(a0)+
         move.b  #' ',(a0)+
-        move.w  d4,d0
+        move.w  d4,d0           ; a1 = entry (HSSIZE = 16 bytes)
         lsl.w   #4,d0
         lea     v_hs(a5),a1
         add.w   d0,a1
@@ -645,8 +681,8 @@ hs_line:                        ; d4 = entry -> v_str "01  012345  NAME        R
         dbra    d1,.n
         move.b  #' ',(a0)+
         move.b  #' ',(a0)+
-        move.b  #'R',(a0)+
-        moveq   #0,d0
+        move.b  #'R',(a0)+      ; round (low byte; the high byte is the
+        moveq   #0,d0           ; easy flag)
         move.b  5(a1),d0
         bsr     put_2dig
         move.b  #' ',(a0)+
@@ -663,6 +699,9 @@ hs_line:                        ; d4 = entry -> v_str "01  012345  NAME        R
 
 ;---------------------------------------------------------------------
 ; Text helpers
+; Texts are QDOS strings (length word, bytes, padded to even). The LQ
+; macro puts a German and an English string one after the other
+; ("pair"); lstr picks the one of v_lang.
 ;---------------------------------------------------------------------
 lstr:                           ; a1 = German/English pair -> a1 = string of v_lang
         tst.w   v_lang(a5)
@@ -682,9 +721,9 @@ pair_n:                         ; a1 = first pair, d0 = n -> a1 = pair n
         dbra    d0,.l
 .e      rts
 
-skip_pair:
+skip_pair:                      ; a1 = pair -> a1 = the next pair
         bsr      skip_q
-skip_q: move.l  d1,-(sp)
+skip_q: move.l  d1,-(sp)        ; a1 = string -> a1 = the next string
         move.w  (a1),d1
         addq.w  #3,d1
         and.w   #$fffe,d1
@@ -710,7 +749,7 @@ print_table:                    ; a2 = table of y,ink,size,pair ... y=-1
 
 put_score:                      ; a1 = BCD long -> 6 digits at (a0)+
         movem.l d0-d2/a1,-(sp)
-        addq.l  #1,a1
+        addq.l  #1,a1           ; the top byte is always 0: 3 bytes left
         moveq   #2,d1
 .d      move.b  (a1)+,d0
         move.b  d0,d2
@@ -765,7 +804,8 @@ waitkey:                        ; d7 = timeout in frames (0 = none) -> NE = key
 ;---------------------------------------------------------------------
 ; High scores: file fuse_hi (TK2 default directory, win1_, flp1_, mdv1_)
 ;---------------------------------------------------------------------
-hs_load:
+hs_load:                        ; -> v_hsmag..v_hs (defaults if no file),
+                                ; v_hidev = device the file came from
         lea     hs_default(pc),a0 ; defaults first
         lea     v_hsmag(a5),a1
         move.w  #HSFILE-1,d0
@@ -785,14 +825,15 @@ hs_load:
         move.w  #HSFILE,d2
         moveq   #-1,d3
         lea     v_name(a5),a1   ; read into a scratch area first
-        lea     v_bombs(a5),a1
+        lea     v_bombs(a5),a1  ; (v_bombs: free while in the menu;
+                                ; the lea above has no effect)
         trap    #3
         move.l  d1,d5
         move.l  a4,a0
         moveq   #IO_CLOSE,d0
         trap    #2
         move.w  d4,v_hidev(a5)
-        cmp.w   #HSFILE,d5
+        cmp.w   #HSFILE,d5      ; take it only if size and magic fit
         bne.s   .e
         lea     v_bombs(a5),a0
         cmp.l   #'FRH3',(a0)
@@ -824,8 +865,8 @@ hs_save:                        ; known device first, then all of them
 
 hs_write:                       ; d4 = device -> EQ = saved
         movem.l d1-d4/a0-a4,-(sp)
-        bsr.s   hs_name
-        move.l  a0,a4
+        bsr.s   hs_name         ; delete, then create it new (QDOS has
+        move.l  a0,a4           ; no "overwrite" for IO.OPEN)
         moveq   #4,d0           ; IO.DELET (error ignored)
         moveq   #-1,d1
         trap    #2
@@ -852,7 +893,7 @@ hs_write:                       ; d4 = device -> EQ = saved
         rts
 
 hs_name:                        ; d4 = device index -> a0 = QDOS file name
-        lea     hs_names(pc),a0
+        lea     hs_names(pc),a0 ; (changes d0, d1)
         move.w  d4,d0
         subq.w  #1,d0
         bmi.s   .e
@@ -864,8 +905,8 @@ hs_name:                        ; d4 = device index -> a0 = QDOS file name
 .e      rts
 
 hs_check:                       ; after game over: insert score, ask for the name
-        lea     v_hs(a5),a1
-        moveq   #0,d4
+        lea     v_hs(a5),a1     ; find the first entry with a lower score
+        moveq   #0,d4           ; (d4 = its place, a1 = the entry)
 .f      move.l  v_score(a5),d0
         cmp.l   (a1),d0
         bhi.s   .ins
@@ -892,7 +933,7 @@ hs_check:                       ; after game over: insert score, ask for the nam
         LEAX    mus_hisc,a0
         bsr     music_play
         bsr     enter_name
-        lea     v_name(a5),a0
+        lea     v_name(a5),a0   ; the name into the entry, save, show
         lea     6(a1),a2
         moveq   #NAMEL-1,d0
 .cn     move.b  (a0)+,(a2)+
@@ -902,6 +943,10 @@ hs_check:                       ; after game over: insert score, ask for the nam
         move.w  #50*15,d7
         bra     waitkey
 
+; enter_name: the player types a name (keyboard) or picks the letters
+; with the joystick: up/down turns the letter at v_npos, left goes
+; back, right/fire goes on (on an empty letter: done), ENTER/ESC end.
+; -> v_name (NAMEL bytes, "???" if empty)
 enter_name:                     ; letter wheel, works with joystick and keys
         movem.l d0-d7/a0-a3,-(sp)
         bsr     page_clear
@@ -930,7 +975,7 @@ enter_name:                     ; letter wheel, works with joystick and keys
         moveq   #4,d5
         moveq   #0,d6
         bsr     print_centre
-        lea     v_name(a5),a0
+        lea     v_name(a5),a0   ; empty name, cursor on the first letter
         moveq   #NAMEL-1,d0
 .bl     move.b  #' ',(a0)+
         dbra    d0,.bl
@@ -947,7 +992,7 @@ enter_name:                     ; letter wheel, works with joystick and keys
         bsr     scan_typed      ; letter or digit typed on the keyboard?
         tst.b   d3
         beq.s   .nt
-        lea     v_name(a5),a0
+        lea     v_name(a5),a0   ; typed: store it, cursor one on
         add.w   v_npos(a5),a0
         move.b  d3,(a0)
         cmp.w   #NAMEL-1,v_npos(a5)
@@ -958,7 +1003,7 @@ enter_name:                     ; letter wheel, works with joystick and keys
         move.w  v_pkeys(a5),d1
         not.w   d1
         and.w   d0,d1           ; newly pressed
-        move.w  d0,d2
+        move.w  d0,d2           ; up/down: turn the letter wheel
         and.w   #(1<<K_UP)|(1<<K_DOWN),d2
         beq.s   .nr
         tst.w   d1              ; held: repeat after a short delay
@@ -988,7 +1033,7 @@ enter_name:                     ; letter wheel, works with joystick and keys
 .st     lea     charset(pc),a1
         move.b  0(a1,d3.w),(a0)
         bra      .draw
-.nr     btst    #K_LEFT,d1
+.nr     btst    #K_LEFT,d1      ; left: one letter back
         beq.s   .nl
         tst.w   v_npos(a5)
         beq      .loop
@@ -1024,7 +1069,7 @@ enter_name:                     ; letter wheel, works with joystick and keys
         rts
 
 name_show:                      ; name in big letters, current one blinking
-        movem.l d0-d7/a0-a4,-(sp)
+        movem.l d0-d7/a0-a4,-(sp) ; (line 120, CSIZE 3,1)
         lea     v_str(a5),a0
         move.w  #NAMEL,(a0)+
         lea     v_name(a5),a1
@@ -1062,7 +1107,7 @@ name_show:                      ; name in big letters, current one blinking
         bne.s   .y
         moveq   #'_',d0
 .y      move.b  d0,(a0)
-        move.l  v_msg(a5),a0
+        move.l  v_msg(a5),a0    ; print it over the name at its place
         moveq   #SD_SETSZ,d0
         moveq   #3,d1
         moveq   #1,d2
@@ -1070,7 +1115,7 @@ name_show:                      ; name in big letters, current one blinking
         moveq   #SD_SETIN,d0
         moveq   #6,d1
         bsr     io3
-        moveq   #SD_PIXP,d0
+        moveq   #SD_PIXP,d0     ; x = centred name + letter * CW1
         move.w  v_npos(a5),d1
         lsl.w   #4,d1
         add.w   #(512-NAMEL*CW1)/2,d1
@@ -1083,19 +1128,22 @@ name_show:                      ; name in big letters, current one blinking
         movem.l (sp)+,d0-d7/a0-a4
         rts
 
+; scan_typed reads all 8 KEYROW rows (row 1 is left to readkeys) and
+; compares them with v_kprev; the first key that went down is looked up
+; in ktab (row * 8 + bit).
 scan_typed:                     ; -> d3.b = character of a newly pressed key (0 = none)
         movem.l d0-d2/d4-d6/a0-a3,-(sp)
         moveq   #0,d3
         moveq   #0,d6           ; matrix row
 .r      cmp.w   #1,d6           ; row 1 (cursor keys, space, enter) is handled elsewhere
         beq.s   .nx
-        lea     v_krb(a5),a3
-        move.b  #9,(a3)
+        lea     v_krb(a5),a3    ; IPC command 9 (KEYROW), 1 parameter
+        move.b  #9,(a3)         ; byte: the row d6
         move.b  #1,1(a3)
         clr.l   2(a3)
         move.b  d6,6(a3)
         move.b  #2,7(a3)
-        moveq   #MT_IPCOM,d0
+        moveq   #MT_IPCOM,d0    ; -> d1.b = the keys of this row
         trap    #1
         lea     v_kprev(a5),a0
         move.b  0(a0,d6.w),d2
@@ -1103,7 +1151,7 @@ scan_typed:                     ; -> d3.b = character of a newly pressed key (0 
         not.b   d2
         and.b   d1,d2           ; bits that became set
         beq.s   .nx
-        moveq   #0,d4
+        moveq   #0,d4           ; d4 = the lowest new bit
 .b      btst    d4,d2
         bne.s   .f
         addq.w  #1,d4
@@ -1112,7 +1160,7 @@ scan_typed:                     ; -> d3.b = character of a newly pressed key (0 
         lsl.w   #3,d0
         add.w   d4,d0
         lea     ktab(pc),a1
-        tst.b   d3
+        tst.b   d3              ; (keep the first one found)
         bne.s   .nx
         move.b  0(a1,d0.w),d3
 .nx     addq.w  #1,d6
@@ -1135,12 +1183,18 @@ char_index:                     ; (a0) -> d3 index in charset (0 if unknown)
 
 ;=====================================================================
 ; Game flow
+;   newgame    score, lives, first round
+;   newround   build the level (backdrop, platforms, bombs) while
+;              "ROUND nn" is shown, then the start tune
+;   newlife    Jack and the enemies to their start
+;   mainloop   one pass = one game loop (LOOPF frames, 25 Hz)
+;   died / roundclear / to_title   leave the loop
 ;=====================================================================
 newgame:
         move.w  pcount(pc),d0   ; mix random seed
         add.w   d0,v_rand+2(a5)
         clr.l   v_score(a5)
-        move.l  #$20000,v_next(a5)
+        move.l  #$20000,v_next(a5) ; first extra life at 20000 (BCD)
         move.w  #3,v_lives(a5)
         tst.w   v_diff(a5)
         beq.s   .nl
@@ -1150,7 +1204,7 @@ newgame:
         move.l  #SCORETEST,v_score(a5)
         move.w  #1,v_lives(a5)
         endc
-newround:
+newround:                       ; (also after roundclear)
         bsr     music_stop
         bsr     page_clear
         bsr     hud_draw
@@ -1161,7 +1215,7 @@ newround:
         moveq   #1,d6
         bsr     print_centre
         bsr     setup_level
-        lea     v_str(a5),a1
+        lea     v_str(a5),a1    ; (again: setup_level drew over it)
         moveq   #70,d4
         moveq   #6,d5
         moveq   #1,d6
@@ -1182,21 +1236,21 @@ newround:
         bsr     music_play
         moveq   #70,d7
         bsr     delay
-        clr.l   v_mptr(a5)
-        bsr     restore_pf
-newlife:
+        clr.l   v_mptr(a5)      ; no music while playing (effects only)
+        bsr     restore_pf      ; texts away: the clean playfield
+newlife:                        ; (also after died)
         bsr     init_actors
-        move.w  pcount(pc),v_last(a5)
-mainloop:
-        bsr     waitloop
-        bsr     bomb_refresh
+        move.w  pcount(pc),v_last(a5) ; the loop timing starts now
+mainloop:                       ; one game loop, see "Game flow"
+        bsr     waitloop        ; LOOPF frames since the last loop
+        bsr     bomb_refresh    ; bombs first, the sprites over them
         bsr     render
         bsr     readkeys
         btst    #K_ESC,d0
         bne     to_title
         move.w  v_pkeys(a5),d1
         not.w   d1
-        and.w   d0,d1
+        and.w   d0,d1           ; d1 = newly pressed
         btst    #K_ENTER,d1
         beq.s   .np
         bsr     pause
@@ -1219,7 +1273,7 @@ mainloop:
         ifne    DEBUG
         bsr     dbg_lag
         endc
-        tst.w   v_hudd(a5)
+        tst.w   v_hudd(a5)      ; score or lives changed
         beq     .nh
         bsr     hud_draw
 .nh     tst.w   v_dead(a5)
@@ -1275,7 +1329,7 @@ check_life:                     ; extra life every 20000 points
         endc
 .e      rts
 
-died:
+died:                           ; Jack was hit: a life less, or game over
         ifne    SOUND
         lea     snd_die(pc),a3
         bsr     ipc
@@ -1285,11 +1339,11 @@ died:
         moveq   #2,d5
         moveq   #1,d6
         bsr     printl
-        moveq   #50,d7
+        moveq   #50,d7          ; 1 s "OUCH"
         bsr     delay
         bsr     erase_all
         bsr     restore_pf
-        subq.w  #1,v_lives(a5)
+        subq.w  #1,v_lives(a5)  ; bombs taken stay taken
         bsr     hud_draw
         tst.w   v_lives(a5)
         bne     newlife
@@ -1305,7 +1359,7 @@ died:
         bsr     hs_check
         bra     menu
 
-roundclear:
+roundclear:                     ; all bombs taken: bonus, next round
         bsr     erase_all
         bsr     bomb_refresh
         clr.l   v_bonus(a5)     ; bonus: 500 for every lit bomb in sequence
@@ -1361,20 +1415,20 @@ roundclear:
         bsr     print_centre
         move.w  #100,d7
         bsr     delay
-        cmp.w   #99,v_round(a5)
+        cmp.w   #99,v_round(a5) ; (2 digits in the high score table)
         beq     .max
         addq.w  #1,v_round(a5)
 .max    bra     newround
 
-to_title:
+to_title:                       ; ESC in the game: back to the menu
         bsr     erase_all
         bra     menu
 
 ;---------------------------------------------------------------------
 ; Program exit
 ;---------------------------------------------------------------------
-exit_prog:
-        clr.l   v_mptr(a5)
+exit_prog:                      ; undo the start: sound off, poll routine
+        clr.l   v_mptr(a5)      ; out, windows closed, Mode 4, heap free
         ifne    SOUND
         lea     snd_kill(pc),a3
         bsr     ipc
@@ -1401,16 +1455,20 @@ exit_prog:
 leave:                          ; d0 = error code, d7 = mode, a4 = SP
         tst.w   d7
         bne     .call
-        move.l  d0,d3
+        move.l  d0,d3           ; Job: remove itself (does not return)
         moveq   #MT_FRJOB,d0
         moveq   #-1,d1
         trap    #1
-.call   move.l  a4,sp
+.call   move.l  a4,sp           ; CALL: back to BASIC
         movem.l (sp)+,d1-d7/a0-a6
         rts
 
 ;=====================================================================
 ; Frame synchronisation
+; pollrt counts pcount up 50 times a second (60 on NTSC machines).
+; The game waits on it: waitloop for one game loop (LOOPF frames),
+; frame1 for one frame; every frame also plays the music.
+; pcount lives in the code, so the program must be in RAM (it is).
 ;=====================================================================
 pcount: dc.w    0
 
@@ -1420,7 +1478,7 @@ pollrt: move.l  a0,-(sp)        ; called by QDOS 50 times a second
         move.l  (sp)+,a0
         rts
 
-waitloop:
+waitloop:                       ; -> v_lag = frames since the last loop
 .w      move.w  pcount(pc),d0
         sub.w   v_last(a5),d0
         cmp.w   #LOOPF,d0
@@ -1434,13 +1492,16 @@ frame1: move.w  pcount(pc),d0   ; wait for the next frame (and play music)
         beq     .w
         ; fallthrough
 
+; music_tick: a tune is a list of (pitch, frames) byte pairs, see
+; music.py. When v_mwait runs out, the next note is sent to the IPC;
+; it sounds for 3/4 of its time, so that equal notes stay apart.
 music_tick:                     ; one step of the music player
         ifne    SOUND
         movem.l d0-d3/a0-a3,-(sp)
         move.l  v_mptr(a5),d0
-        beq.s   .e
+        beq.s   .e              ; no tune
         subq.w  #1,v_mwait(a5)
-        bgt.s   .e
+        bgt.s   .e              ; the note still sounds
         move.l  d0,a0
 .nt     moveq   #0,d1
         move.b  (a0)+,d1        ; pitch (0 = rest)
@@ -1488,7 +1549,7 @@ music_play:                     ; a0 = tune (nothing if music is switched off)
         move.w  #1,v_mwait(a5)
         rts
 
-music_stop:
+music_stop:                     ; no tune, and the IPC sound off
         clr.l   v_mptr(a5)
         ifne    SOUND
         movem.l d0-d3/a0-a3,-(sp)
@@ -1508,7 +1569,10 @@ delay:                          ; d7 = number of frames
 ;=====================================================================
 ; Input
 ;=====================================================================
-readkeys:                       ; -> d0 = KEYROW(1)
+; readkeys: KEYROW(1) holds the cursor keys, space, ENTER and ESC (the
+; CTL1 joystick sends the same). KEYROW(0) holds F1-F5 (CTL2 joystick,
+; the first MiSTer pad); they are mapped onto the cursor bits.
+readkeys:                       ; -> d0 = KEYROW(1), also v_keys (v_pkeys = before)
         movem.l d1-d3/a0-a3,-(sp)
         lea     kr1(pc),a3
         moveq   #MT_IPCOM,d0
@@ -1545,7 +1609,7 @@ readkeys:                       ; -> d0 = KEYROW(1)
         movem.l (sp)+,d1-d3/a0-a3
         rts
 
-ipc:    movem.l d0-d3/a0-a3,-(sp)
+ipc:    movem.l d0-d3/a0-a3,-(sp) ; a3 = IPC command block (sound)
         moveq   #MT_IPCOM,d0
         trap    #1
         movem.l (sp)+,d0-d3/a0-a3
@@ -1553,6 +1617,11 @@ ipc:    movem.l d0-d3/a0-a3,-(sp)
 
 ;=====================================================================
 ; Screen helpers
+; Mode 8: one word = 4 pixels, 128 bytes per line. Pixel p (0..3) of a
+; word: green bit 15-2p, flash 14-2p, red 7-2p, blue 6-2p.
+; Most drawing goes into the background buffer (a4 = v_bg, same layout
+; as the screen) and is then copied to the screen, so that sprites can
+; restore what was under them.
 ;=====================================================================
 cls_all:                        ; clear screen and background buffer
         lea     SCREEN,a0
@@ -1577,23 +1646,24 @@ restore_pf:                     ; restore whole playfield from buffer
         rts
 
 ; setpix: d0 = x, d1 = y, d2 = colour, a4 = buffer
+; (slow but simple: for level building, not for the game loop)
 setpix: movem.l d3-d6/a1,-(sp)
-        move.w  d1,d3
+        move.w  d1,d3           ; d3 = y * 128 + x / 4 * 2
         lsl.w   #7,d3
         move.w  d0,d4
         lsr.w   #2,d4
         add.w   d4,d4
         add.w   d4,d3
-        move.w  d0,d4
+        move.w  d0,d4           ; d4 = pixel in the word * 2
         and.w   #3,d4
         add.w   d4,d4
         lea     clrmask(pc),a1
         move.w  0(a4,d3.w),d5
-        and.w   0(a1,d4.w),d5
+        and.w   0(a1,d4.w),d5   ; clear the pixel (clrmask)
         move.w  d2,d6
         lsl.w   #3,d6
         add.w   d4,d6
-        or.w    8(a1,d6.w),d5
+        or.w    8(a1,d6.w),d5   ; set its colour (pixtab = clrmask+8)
         move.w  d5,0(a4,d3.w)
         movem.l (sp)+,d3-d6/a1
         rts
@@ -1615,6 +1685,9 @@ fillrect:
         rts
 
 ; drawbrick: d0 = x, d1 = y, d6 = width, d7 = height (brickwork)
+; Pattern of 6 lines: top edge line, 2 brick lines, mortar line, 2 brick
+; lines; bricks are 8 pixels long, the lower row shifted by 4. Colours:
+; v_bc0 edge, v_bc1 brick, v_bc2 mortar, v_bc3 joint (level descriptor).
 drawbrick:
         movem.l d0-d7,-(sp)
         moveq   #0,d5           ; row within brick
@@ -1650,7 +1723,7 @@ drawbrick:
         movem.l (sp)+,d0-d7
         rts
 
-rand:                           ; -> d0.w random number
+rand:                           ; -> d0.w random number (linear congruential)
         move.l  v_rand(a5),d0
         mulu    #25173,d0
         add.l   #13849,d0
@@ -1660,6 +1733,15 @@ rand:                           ; -> d0.w random number
 
 ;=====================================================================
 ; Level setup
+; A level descriptor (levels.inc, made by levels.py), all words:
+;   0 type, 2 start x, 4 start y (pixels), 6 platforms, 8 bombs,
+;   10 spawn table, 12 backdrop (offsets from the descriptor),
+;   14 moon x, 16 moon y (x = 0: no moon), 18..24 brick colours
+; Platforms: x, y, width, height ... -1 (the first one is the floor).
+; Bombs: x, y ... -1.
+; setup_level draws the whole level into the background buffer (stars,
+; moon, backdrop, bricks, bombs), sets the round's difficulty and then
+; shows the buffer.
 ;=====================================================================
 setup_level:
         move.l  v_bg(a5),a0     ; clear background buffer only
@@ -1667,7 +1749,7 @@ setup_level:
         moveq   #0,d1
 .cl     move.l  d1,(a0)+
         dbra    d0,.cl
-        move.w  v_round(a5),d0
+        move.w  v_round(a5),d0  ; the layouts repeat after NLEV rounds
         subq.w  #1,d0
         ext.l   d0
         divu    #NLEV,d0
@@ -1677,7 +1759,7 @@ setup_level:
         LEAX    lvltab,a0
         move.w  0(a0,d0.w),d1
         lea     0(a0,d1.w),a3   ; a3 = level descriptor
-        move.w  6(a3),d1
+        move.w  6(a3),d1        ; platforms and spawn table: kept
         lea     0(a3,d1.w),a1
         move.l  a1,v_plat(a5)
         move.w  10(a3),d1
@@ -1738,7 +1820,7 @@ setup_level:
 .dd     clr.w   v_litc(a5)
 
         move.l  v_bg(a5),a4
-        ; stars
+        ; stars: 60 random pixels in the sky (white or cyan)
         moveq   #59,d7
 .st     bsr     rand
         move.w  d0,d3
@@ -1793,7 +1875,8 @@ setup_level:
         bsr     drawbrick
         bra     .pl
 .pd
-        ; bombs
+        ; bombs: keep the background under each one (b_save), so that
+        ; a taken bomb can be removed again; d6 counts them
         move.w  8(a3),d1
         lea     0(a3,d1.w),a2
         lea     v_bombs(a5),a0
@@ -1813,7 +1896,7 @@ setup_level:
         lea     LINEB(a1),a1
         dbra    d1,.sv
         movem.l d6/a2,-(sp)
-        move.w  #-1,v_lit(a5)
+        move.w  #-1,v_lit(a5)   ; (draw it unlit)
         bsr     bomb_paint
         movem.l (sp)+,d6/a2
         lea     b_size(a0),a0
@@ -1825,7 +1908,8 @@ setup_level:
         endc
         move.w  d6,v_nb(a5)
         move.w  d6,v_bleft(a5)
-        move.w  #-1,v_lit(a5)
+        move.w  #-1,v_lit(a5)   ; no bomb lit yet (the first one taken
+                                ; lights the next)
         clr.w   v_flash(a5)
         ; remember start position
         move.w  2(a3),d0
@@ -1834,9 +1918,11 @@ setup_level:
         move.w  4(a3),d0
         lsl.w   #4,d0
         move.w  d0,v_jsy(a5)
-        bra     restore_pf
+        bra     restore_pf      ; the finished level to the screen
 
 draw_moon:                      ; crescent moon top right (ellipse due to wide Mode 8 pixels)
+        ; yellow where inside the first circle and outside the second,
+        ; black inside both (the dark part of the moon)
         moveq   #-9,d4          ; dx
 .x      moveq   #-12,d5         ; dy
 .y      move.w  d5,d1
@@ -1873,6 +1959,11 @@ draw_moon:                      ; crescent moon top right (ellipse due to wide M
 draw_spans:                     ; a2 = backdrop byte code, a4 = buffer
 ; y<248: hspan y,x0,len,col  248: PROFILE  249: EDGE  250: RECT
 ; 251: COLS  255: end   (see backdrops.py)
+;   PROFILE x0,n,col,ybot, n * ytop   columns from ytop down to ybot
+;   EDGE    x0,n,col, n * y           one (patterned) pixel per column
+;   RECT    x,y,w,h,col               filled rectangle
+;   COLS    x0,n,col, n * (ytop,len)  columns of their own length
+; col = colour (bits 0-2) | pattern << 3, see pattest
 .op     moveq   #0,d1
         move.b  (a2)+,d1
         cmp.w   #248,d1
@@ -2000,7 +2091,7 @@ hrun:   movem.l d0/d3-d7/a1/a3,-(sp)
         addq.l  #2,a1
 .n2     rts
 
-vrun:   movem.l d1/d3-d7/a1/a3,-(sp)
+vrun:   movem.l d1/d3-d7/a1/a3,-(sp) ; column: d6 pixels down from d1
         tst.w   d6
         ble.s   .e
         bsr      pixaddr
@@ -2022,6 +2113,8 @@ vrun:   movem.l d1/d3-d7/a1/a3,-(sp)
 
 ; hrunp: patterned span (d0..d6 as hrun, a1/d4/a3 from pixaddr)
 ; uses pattab: pattern masks for 8 pixels, so whole words are done at once
+; Every word: new = (old & ~mask) | (colour & mask), where mask is the
+; pattern mask cut to the pixels of the span (lmask/rmask at the ends).
 hrunp:  movem.l d0-d7/a0,-(sp)
         move.w  d5,d3
         lsr.w   #3,d3
@@ -2101,7 +2194,7 @@ plot:   bsr.s   pattest         ; single pixel through the pattern
 ; pattest: d0 = x, d1 = y, d5 = colour|pattern<<3 -> NE = draw pixel (uses d3)
 ; same rules as pat() in backdrops.py
 pattest:
-        move.w  d5,d3
+        move.w  d5,d3           ; pattern * 2 = index into the jump table
         lsr.w   #2,d3
         and.w   #14,d3
         move.w  .tab(pc,d3.w),d3
@@ -2156,6 +2249,9 @@ pattest:
 
 ;=====================================================================
 ; Bombs
+; A bomb is 8x8 pixels (2 words wide) at b_x (a multiple of 4), b_y.
+; b_save holds the background below it. The lit bomb (v_lit) blinks
+; between two pictures; b_dirty asks bomb_refresh to paint it again.
 ;=====================================================================
 bomb_offset:                    ; a0 = bomb -> d0.w = offset
         move.w  b_y(a0),d0
@@ -2185,18 +2281,18 @@ bomb_paint:
         lea     LINEB(a1),a1
         lea     LINEB(a2),a2
         dbra    d2,.r
-        tst.w   b_state(a0)
+        tst.w   b_state(a0)     ; taken: only the background
         beq     .e
         lea     -8*LINEB(a1),a1
         lea     -8*LINEB(a2),a2
-        LEAX    bomb_n,a3
+        LEAX    bomb_n,a3       ; picture: normal, or lit (2 phases)
         cmp.w   v_lit(a5),d6
         bne     .d
         LEAX    bomb_l1,a3
         btst    #2,v_flash+1(a5)
         beq     .d
         LEAX    bomb_l2,a3
-.d      moveq   #7,d2
+.d      moveq   #7,d2           ; 8 lines x 2 words, buffer and screen
 .dl     move.w  (a3)+,d0        ; mask
         move.w  (a3)+,d1        ; data
         move.w  (a1),d3
@@ -2224,7 +2320,7 @@ bomb_paint:
         rts
 
 bomb_refresh:                   ; call after erase_all
-        addq.w  #1,v_flash(a5)
+        addq.w  #1,v_flash(a5)  ; the lit bomb: a new phase every 4 loops
         move.w  v_lit(a5),d0
         bmi     .nl
         move.w  v_flash(a5),d1
@@ -2233,7 +2329,7 @@ bomb_refresh:                   ; call after erase_all
         mulu    #b_size,d0
         lea     v_bombs(a5),a0
         move.w  #1,b_dirty(a0,d0.w)
-.nl     lea     v_bombs(a5),a0
+.nl     lea     v_bombs(a5),a0  ; paint every dirty bomb (d6 = index)
         move.w  v_nb(a5),d7
         subq.w  #1,d7
         bmi     .e
@@ -2248,6 +2344,7 @@ bomb_refresh:                   ; call after erase_all
 .e      rts
 
 check_bombs:                    ; collision Jack <-> bombs
+        ; Jack's box: x+1..x+10, y..y+15; a bomb's box: 8x8
         lea     v_spr(a5),a1
         move.w  s_x(a1),d2
         asr.w   #4,d2
@@ -2283,6 +2380,9 @@ check_bombs:                    ; collision Jack <-> bombs
         dbra    d7,.l
 .e      rts
 
+; collect: the bomb is gone (b_dirty: painted away), points, maybe the
+; bonus item. Taking the lit bomb (or the first bomb of the round)
+; lights the next bomb still there, in list order.
 collect:                        ; a0 = bomb, d6 = index
         movem.l d0-d7/a0-a1,-(sp)
         clr.w   b_state(a0)
@@ -2320,8 +2420,8 @@ collect:                        ; a0 = bomb, d6 = index
         bpl     .add            ; another one stays lit
 .nx     ; next lit bomb = next remaining one in list order
         move.w  #-1,v_lit(a5)
-        move.w  v_nb(a5),d2
-        move.w  d6,d3
+        move.w  v_nb(a5),d2     ; d3 = candidate, from the next one on,
+        move.w  d6,d3           ; wrapping around; at most nb-1 tries
         move.w  d2,d4
         subq.w  #2,d4
         bmi     .add
@@ -2343,8 +2443,8 @@ collect:                        ; a0 = bomb, d6 = index
         rts
 
 add_score:                      ; d0.l = points (BCD)
-        move.l  d0,v_ptsb(a5)
-        lea     v_ptsb+4(a5),a0
+        move.l  d0,v_ptsb(a5)   ; abcd adds byte by byte from the end;
+        lea     v_ptsb+4(a5),a0 ; X = 0 and Z = 1 before the first one
         lea     v_score+4(a5),a1
         move    #4,ccr
         abcd    -(a0),-(a1)
@@ -2355,8 +2455,14 @@ add_score:                      ; d0.l = points (BCD)
 
 ;=====================================================================
 ; Sprites
+; Slots in v_spr: 0 = Jack, 1..MAXEN = enemies, MAXEN+1 = bonus item.
+; A sprite picture is 12x16 pixels, stored 4 times (shifted by 0..3
+; pixels), each as 16 lines x 4 words x (mask, data) = 256 bytes; so a
+; sprite at any x is drawn with whole words: screen = screen & mask
+; | data. s_soff remembers where it was drawn, erase_spr copies the
+; background buffer back there (16 lines x 4 words).
 ;=====================================================================
-init_actors:
+init_actors:                    ; all slots empty, Jack at the start
         lea     v_spr(a5),a0
         move.w  #s_size*NSPR/2-1,d0
 .c      clr.w   (a0)+
@@ -2385,6 +2491,7 @@ init_actors:
 ; sprite is missing from the screen only for a moment (less flicker).
 ; Sprites already done this frame that touch an erased area are redrawn.
 render: movem.l d0-d7/a0-a4,-(sp)
+        ; 1. list the sprites to show or to erase, sorted by line
         lea     v_ord(a5),a3
         lea     v_okey(a5),a1
         moveq   #0,d7           ; number of entries
@@ -2420,6 +2527,8 @@ render: movem.l d0-d7/a0-a4,-(sp)
         addq.w  #1,d7
 .nx     lea     s_size(a0),a0
         dbra    d6,.col
+        ; 2. in that order: erase it, repair earlier ones it touched,
+        ;    draw it at its new place
         moveq   #0,d6
 .pr     cmp.w   d7,d6
         bge.s   .done
@@ -2502,7 +2611,7 @@ overlap:                        ; d0, d4 = screen offsets -> d1 = 1 (NE) if the 
         movem.l (sp)+,d2-d3
         rts
 
-erase_all:                      ; reverse drawing order
+erase_all:                      ; every sprite off the screen (reverse drawing order)
         lea     v_spr(a5),a0
         bsr     erase_spr
         lea     BONUSSPR(a5),a0
@@ -2514,7 +2623,7 @@ erase_all:                      ; reverse drawing order
         dbra    d7,.l
         rts
 
-erase_spr:
+erase_spr:                      ; a0 = sprite: background back where it was drawn
         tst.w   s_drawn(a0)
         beq     .e
         clr.w   s_drawn(a0)
@@ -2533,6 +2642,7 @@ erase_spr:
 .e      rts
 
 draw_all:                       ; enemies first, Jack on top
+                                ; (not called any more: render does it)
         lea     v_spr+s_size(a5),a0
         moveq   #MAXEN-1,d7
 .l      tst.w   s_act(a0)
@@ -2553,13 +2663,13 @@ draw_all:                       ; enemies first, Jack on top
         beq.s   draw_spr
         rts
 
-draw_spr:
-        move.w  s_y(a0),d0
+draw_spr:                       ; a0 = sprite: draw s_img at s_x, s_y (screen only)
+        move.w  s_y(a0),d0      ; d0 = screen offset of the top left word
         asr.w   #4,d0
         lsl.w   #7,d0
         move.w  s_x(a0),d1
         asr.w   #4,d1
-        move.w  d1,d2
+        move.w  d1,d2           ; d2 = x & 3: which shifted copy
         and.w   #3,d2
         lsr.w   #2,d1
         add.w   d1,d1
@@ -2567,7 +2677,7 @@ draw_spr:
         move.w  d0,s_soff(a0)
         move.w  #1,s_drawn(a0)
         move.l  s_img(a0),a2
-        lsl.w   #8,d2
+        lsl.w   #8,d2           ; copy * 256 bytes
         add.w   d2,a2
         lea     SCREEN,a1
         and.l   #$ffff,d0
@@ -2587,6 +2697,12 @@ draw_spr:
 ;=====================================================================
 ; Movement with platform collision
 ; a0 = sprite. s_flag bit 0 = blocked sideways
+; First x: move by s_vx, keep inside XMIN..XMAX, undo the move if the
+; body (x+1..x+10, 16 lines) would be in a platform. Then y: falling,
+; it lands on the highest platform top crossed on the way (s_gnd = 1);
+; rising, it stops below the lowest platform bottom crossed and
+; below the ceiling (PF_CEIL).
+; levels.py copies these rules for its reachability check.
 ;=====================================================================
 body_move:
         movem.l d0-d7/a1-a2,-(sp)
@@ -2655,7 +2771,7 @@ body_move:
         add.w   #SPRH,d6        ; old bottom
         move.w  d3,d7
         add.w   #SPRH,d7        ; new bottom
-        move.w  #$7fff,d1
+        move.w  #$7fff,d1       ; d1 = highest top found (none yet)
         move.l  a2,a1
 .fl     move.w  (a1)+,d2
         bmi     .fd
@@ -2676,7 +2792,7 @@ body_move:
         bra     .fl
 .fd     cmp.w   #$7fff,d1
         beq     .air
-        sub.w   #SPRH,d1
+        sub.w   #SPRH,d1        ; landed: stand on that top
         lsl.w   #4,d1
         move.w  d1,d0
         clr.w   s_vy(a0)
@@ -2685,7 +2801,7 @@ body_move:
 .air    clr.w   s_gnd(a0)
         bra     .vd
 .up     ; rising: bump head on platform underside
-        moveq   #-1,d1
+        moveq   #-1,d1          ; d1 = lowest underside found (none yet)
         move.l  a2,a1
 .ul     move.w  (a1)+,d7
         bmi     .ud
@@ -2721,11 +2837,17 @@ body_move:
 
 ;=====================================================================
 ; Jack
+; left/right walk (WALKV). Up or fire on the ground jumps (JUMPV; only
+; when newly pressed). In the air: gravity GRAV; letting go of the key
+; while rising cuts the jump short (SHORTV); holding it while falling
+; glides (GLIDEV); down falls fast (FASTV). Pictures in spr_jack:
+; 0 stand, 1-2 walk, 3 jump/fall, 4 glide; each facing right and left
+; (1 KB each, so picture * 2 + direction).
 ;=====================================================================
 update_jack:
         lea     v_spr(a5),a0
         move.w  v_keys(a5),d3
-        moveq   #0,d1
+        moveq   #0,d1           ; d1 = vx
         btst    #K_LEFT,d3
         beq     .nl
         move.w  #-WALKV,d1
@@ -2739,7 +2861,7 @@ update_jack:
         and.w   #KM_JUMP,d4     ; jump key held
         move.w  v_pkeys(a5),d5
         and.w   #KM_JUMP,d5
-        move.w  s_vy(a0),d2
+        move.w  s_vy(a0),d2     ; d2 = vy
         tst.w   s_gnd(a0)
         beq     .air
         tst.w   d4
@@ -2805,6 +2927,13 @@ update_jack:
 
 ;=====================================================================
 ; Enemies
+; s_type: 1 walker (walks the platforms; on the floor it turns into
+; a flyer), 2 seeker/flyer (flies towards Jack), 3 explosion (a caught
+; frozen enemy, harmless), 5 hopper (from round 5: jumps at Jack).
+; New enemies come every v_spwin loops at the ceiling, at the x
+; positions of the level's spawn table (3 entries, in turn), up to
+; v_maxen at the same time. While v_freeze runs no enemy moves and
+; none comes.
 ;=====================================================================
 update_enemies:
         tst.w   v_freeze(a5)
@@ -2880,7 +3009,7 @@ expl_upd:                       ; a0 = exploding enemy
         move.l  a1,s_img(a0)
         rts
 
-spawn_enemy:
+spawn_enemy:                    ; a new enemy in a free slot (if allowed)
         lea     v_spr+s_size(a5),a0
         moveq   #0,d1           ; number active
         sub.l   a1,a1           ; free slot
@@ -2898,7 +3027,7 @@ spawn_enemy:
         bge     .e
         cmp.l   #0,a1
         beq     .e
-        move.l  a1,a0
+        move.l  a1,a0           ; a0 = the free slot, cleared
         move.w  #s_size/2-1,d0
 .z      clr.w   (a1)+
         dbra    d0,.z
@@ -2914,7 +3043,7 @@ spawn_enemy:
 .h4     tst.w   d0
         bne.s   .wk
         move.w  #5,s_type(a0)
-.wk     move.w  v_spwi(a5),d0
+.wk     move.w  v_spwi(a5),d0   ; next spawn position 0, 1, 2, 0 ...
         addq.w  #1,v_spwi(a5)
         cmp.w   #2,d0
         blt     .s
@@ -2925,7 +3054,7 @@ spawn_enemy:
         lsl.w   #4,d0
         move.w  d0,s_x(a0)
         move.w  #PF_CEIL<<4,s_y(a0)
-        move.w  v_espd(a5),d1
+        move.w  v_espd(a5),d1   ; it walks towards Jack's side
         lea     v_spr(a5),a1
         cmp.w   s_x(a1),d0
         blt     .r
@@ -2967,7 +3096,7 @@ hopper_upd:                     ; waits on the ground, then jumps towards Jack
         btst    #0,s_flag+1(a0)
         beq.s   .nw
         neg.w   s_vx(a0)
-.nw     tst.w   s_gnd(a0)
+.nw     tst.w   s_gnd(a0)       ; on the ground now, but not before
         beq.s   .img
         tst.w   d2
         bne.s   .img
@@ -2975,7 +3104,7 @@ hopper_upd:                     ; waits on the ground, then jumps towards Jack
         and.w   #15,d0
         add.w   #20,d0
         move.w  d0,s_dir(a0)
-.img    LEAX    spr_hop,a1
+.img    LEAX    spr_hop,a1      ; picture 0 sitting, 1 jumping
         tst.w   s_gnd(a0)
         bne.s   .i
         lea     1024(a1),a1
@@ -2983,7 +3112,7 @@ hopper_upd:                     ; waits on the ground, then jumps towards Jack
         rts
 
 walker_upd:                     ; walks on platforms, drops off edges
-        move.w  s_vy(a0),d0
+        move.w  s_vy(a0),d0     ; (turns at walls: s_flag bit 0)
         tst.w   s_gnd(a0)
         bne     .g
         addq.w  #GRAV,d0
@@ -3021,6 +3150,8 @@ walker_upd:                     ; walks on platforms, drops off edges
         rts
 
 seeker_upd:                     ; flies towards Jack with inertia
+        ; speed changes by 2/16 px per loop towards Jack, in x and y;
+        ; it flies through platforms and bounces off the edges
         lea     v_spr(a5),a1
         move.w  v_espd(a5),d4
         addq.w  #6,d4           ; top speed
@@ -3075,7 +3206,7 @@ seeker_upd:                     ; flies towards Jack with inertia
         add.w   d0,a1
         move.l  a1,s_img(a0)
         rts
-.clamp  cmp.w   d4,d1
+.clamp  cmp.w   d4,d1           ; d1 = -d4..d4
         ble     .c1
         move.w  d4,d1
 .c1     neg.w   d4
@@ -3085,11 +3216,15 @@ seeker_upd:                     ; flies towards Jack with inertia
 .c2     neg.w   d4
         rts
 
+; check_hits: an enemy whose distance to Jack lies inside the hit
+; window of its type (hitwin, made by gfx.py from the visible pixels)
+; touches him: v_dead = 1, or, while the enemies are frozen, it is
+; caught. Also counts down Jack's protection (v_inv).
 check_hits:                     ; Jack vs enemies (shrunk boxes)
         tst.w   v_inv(a5)
         beq.s   .ni
         subq.w  #1,v_inv(a5)
-.ni     lea     v_spr(a5),a1
+.ni     lea     v_spr(a5),a1    ; d2, d3 = Jack's x, y in pixels
         move.w  s_x(a1),d2
         asr.w   #4,d2
         move.w  s_y(a1),d3
@@ -3139,6 +3274,8 @@ check_hits:                     ; Jack vs enemies (shrunk boxes)
         rts
 
 catch_enemy:                    ; a0 = frozen enemy touched by Jack
+        ; points v_fpts (200 for the first, doubled each time up to
+        ; 3200; set when the freeze starts)
         movem.l d0-d3/d7/a0-a1,-(sp)
         move.w  #3,s_type(a0)   ; burst into an explosion
         clr.w   s_anim(a0)
@@ -3163,6 +3300,10 @@ catch_enemy:                    ; a0 = frozen enemy touched by Jack
 
 ;---------------------------------------------------------------------
 ; Bonus items: 0 = extra life, 1 = freeze, 2 = blast
+; One comes every BONUSEVERY bonus points (a bomb 1, the lit bomb 2),
+; if none is out. It uses the last sprite slot (s_type 4, the kind in
+; s_dir), flies diagonally and bounces off the edges for BONUST loops,
+; and blinks in the last 2 s (s_gnd = 1: not shown this loop).
 ;---------------------------------------------------------------------
 spawn_bonus:                    ; random kind
         movem.l d0-d2/a0-a1,-(sp)
@@ -3180,7 +3321,7 @@ spawn_bonus:                    ; random kind
         movem.l (sp)+,d0-d2/a0-a1
         rts
 
-spawn_bonus_k:                  ; d1 = kind, d2 = random bits
+spawn_bonus_k:                  ; d1 = kind, d2 = random bits (x, direction)
         lea     BONUSSPR(a5),a0
         move.l  a0,a1
         move.w  #s_size/2-1,d0
@@ -3211,7 +3352,7 @@ spawn_bonus_k:                  ; d1 = kind, d2 = random bits
         rts
 
 bonus_img:                      ; a0 = bonus: picture from kind and animation
-        move.w  s_dir(a0),d0
+        move.w  s_dir(a0),d0    ; (2 pictures per kind, 1 KB each)
         add.w   d0,d0
         move.w  s_anim(a0),d1
         lsr.w   #2,d1
@@ -3224,7 +3365,7 @@ bonus_img:                      ; a0 = bonus: picture from kind and animation
         move.l  a1,s_img(a0)
         rts
 
-update_bonus:
+update_bonus:                   ; move the bonus item, Jack takes it?
         ifd     BONUSTEST       ; test build: bonus appears on Jack after 4 s
         addq.w  #1,v_btest(a5)
         cmp.w   #100,v_btest(a5)
@@ -3256,7 +3397,7 @@ update_bonus:
         beq     .e
         subq.w  #1,v_btime(a5)
         bgt     .mv
-        clr.w   s_act(a0)
+        clr.w   s_act(a0)       ; time is up: gone
 .e      rts
 .mv     move.w  s_x(a0),d0      ; bounce around, ignoring platforms
         add.w   s_vx(a0),d0
@@ -3307,7 +3448,7 @@ update_bonus:
 bonus_hit:                      ; a0 = bonus item
         clr.w   s_act(a0)
         move.w  #1,v_hudd(a5)
-        move.w  s_dir(a0),d0
+        move.w  s_dir(a0),d0    ; the kind
         beq     .life
         subq.w  #1,d0
         beq     .frz
@@ -3325,7 +3466,7 @@ bonus_hit:                      ; a0 = bonus item
         movem.l (sp)+,d7/a0
 .n      lea     s_size(a0),a0
         dbra    d7,.l
-        move.w  v_spwin(a5),v_spawn(a5)
+        move.w  v_spwin(a5),v_spawn(a5) ; a full pause before the next
         clr.w   v_freeze(a5)
         ifne    SOUND
         lea     snd_blast(pc),a3
@@ -3333,13 +3474,13 @@ bonus_hit:                      ; a0 = bonus item
         endc
         rts
 .frz    move.w  #FREEZET,v_freeze(a5)
-        move.l  #$200,v_fpts(a5)
+        move.l  #$200,v_fpts(a5) ; first caught enemy: 200 points
         ifne    SOUND
         lea     snd_frz(pc),a3
         bsr     ipc
         endc
         rts
-.life   cmp.w   #9,v_lives(a5)
+.life   cmp.w   #9,v_lives(a5)  ; (one digit in the HUD)
         bhs     .s
         addq.w  #1,v_lives(a5)
 .s      ifne    SOUND
@@ -3350,6 +3491,9 @@ bonus_hit:                      ; a0 = bonus item
 
 ;=====================================================================
 ; Text / HUD (via QDOS windows)
+; Two console windows: the HUD line at the top (hudname) and the rest
+; of the screen for messages and pages (msgname). Text positions use
+; QDOS pixel coordinates: x 0..511 (2 per Mode 8 pixel), y in lines.
 ;=====================================================================
 opench:                         ; a0 = name -> a0 = channel
         moveq   #IO_OPEN,d0
@@ -3374,11 +3518,14 @@ opench:                         ; a0 = name -> a0 = channel
         moveq   #0,d2
         bsr     io3
         rts                     ; (no clear: keeps the loading screen visible)
-io3:    moveq   #-1,d3
+io3:    moveq   #-1,d3          ; trap #3 with d0 = function, a0 = channel,
+                                ; no timeout (smashes a1!)
         trap    #3
         rts
 
-; print_centre: a1 = QDOS string, d4 = y, d5 = ink, d6 = size (0/1)
+; print_centre: a1 = QDOS string, d4 = y, d5 = ink, d6 = size
+;   0 small (CSIZE 2,0) centred, 1 big (CSIZE 3,1) centred,
+;   2 small, left aligned at TXTX
 print_centre:
         movem.l d0-d7/a0-a4,-(sp)
         move.l  a1,a4           ; trap #3 smashes A1!
@@ -3398,7 +3545,7 @@ print_centre:
         move.w  #TXTX,d1        ; size 2: small, left aligned at TXTX
         cmp.w   #2,d6
         beq     .p
-        move.w  #CW0,d1
+        move.w  #CW0,d1         ; x = (512 - length * char width) / 2
         tst.w   d6
         beq     .w
         move.w  #CW1,d1
@@ -3416,10 +3563,10 @@ print_centre:
         movem.l (sp)+,d0-d7/a0-a4
         rts
 
-hud_draw:
+hud_draw:                       ; "SCORE 000000  ROUND 00  LIVES 0" (yellow)
         movem.l d0-d7/a0-a3,-(sp)
         clr.w   v_hudd(a5)
-        lea     hudtpl(pc),a0
+        lea     hudtpl(pc),a0   ; the template of v_lang, digits put in
         tst.w   v_lang(a5)
         beq.s   .de
         lea     32(a0),a0
@@ -3512,6 +3659,9 @@ dbg_lag:                        ; measures max frames per loop (excluding HUD ou
 
 ;=====================================================================
 ; Data
+; IPC sound blocks: $0a, 8 parameter bytes, pitch 1, pitch 2,
+; grad x (lo, hi), duration (lo, hi, 43.64 us units), grad y / wrap,
+; random / fuzz, 1 (see CLAUDE.md)
 ;=====================================================================
 kr1:    dc.b    9,1,0,0,0,0,1,2         ; IPC: KEYROW(1)
 kr0:    dc.b    9,1,0,0,0,0,0,2         ; IPC: KEYROW(0)
@@ -3534,16 +3684,18 @@ snd_kill: dc.b  $0b,0,0,0,0,0,1
         even
         endc
 
-hudname: qstr   'con_512x16a0x0'
-msgname: qstr   'con_512x236a0x20'
+hudname: qstr   'con_512x16a0x0'        ; the HUD line
+msgname: qstr   'con_512x236a0x20'      ; everything below the HUD line
 LQ      macro                   ; German / English string pair
         qstr    \1
         qstr    \2
         endm
 
+; HUD templates, German and English, 32 bytes each (hud_draw puts the
+; digits in at bytes 6, 20 and 30)
 hudtpl: dc.b    'SCORE 000000  RUNDE 00  LEBEN 0 '
         dc.b    'SCORE 000000  ROUND 00  LIVES 0 '
-s_round: dc.b   'RUNDE ROUND '
+s_round: dc.b   'RUNDE ROUND '          ; 6 characters each (build_round)
         even
 s_ready: LQ     'LOS GEHTS!','GET READY!'
 s_ouch:  LQ     'AUTSCH!','OUCH!'
@@ -3555,7 +3707,7 @@ mn_hi:   LQ     'HIGHSCORE ','HIGH SCORE '
 s_rank:  LQ     'PLATZ ','RANK '
 s_key:   LQ     ' TASTE DRUECKEN ',' PRESS ANY KEY '
 
-lvlnames:
+lvlnames:                       ; one per level layout (v_lvl)
         LQ      'DIE STADT','THE CITY'
         LQ      'DIE BERGE','THE MOUNTAINS'
         LQ      'DIE WUESTE','THE DESERT'
@@ -3566,7 +3718,7 @@ lvlnames:
         LQ      'DIE ARKTIS','THE ARCTIC'
         LQ      'DER VULKAN','THE VOLCANO'
 
-mn_items:
+mn_items:                       ; menu entries in v_sel order
         LQ      'SPIEL STARTEN','START GAME'
         LQ      'ANLEITUNG','HOW TO PLAY'
         LQ      'HIGHSCORES','HIGH SCORES'
@@ -3578,6 +3730,7 @@ mn_items:
 mn_easy: LQ     'SCHWIERIGKEIT: LEICHT','DIFFICULTY: EASY'
 mn_moff: LQ     'MUSIK: AUS','MUSIC: OFF'
 
+; Pages for print_table: y, ink, size, LQ pair ... -1
 mn_title:
         dc.w    18,6,1
         LQ      'FUSE RUNNER','FUSE RUNNER'
@@ -3673,17 +3826,17 @@ ktab:   dc.b    0,0,'5',0,0,0,'4','7'               ; F4 F1 5 F2 F3 F5 4 7
         dc.b    '9','W','I',0,'R','-','Y','O'       ; tab
         dc.b    '8','2','6','Q','E','0','T','U'
         dc.b    0,0,0,'X','V',0,'N',0               ; shift ctrl alt / ,
-charset: dc.b   ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-!'
+charset: dc.b   ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-!' ; the letter wheel
 CHARN   equ     *-charset
         even
 
-hs_names:
+hs_names:                               ; device 0..3 (hs_name)
         qstr    'fuse_hi'
         qstr    'win1_fuse_hi'
         qstr    'flp1_fuse_hi'
         qstr    'mdv1_fuse_hi'
 
-hs_default:
+hs_default:                             ; the file image without a file
         dc.l    'FRH3'
         dc.w    0                       ; language: German
         dc.w    0                       ; difficulty: normal
@@ -3719,7 +3872,7 @@ hs_default:
         dc.w    1
         dc.b    'QL        '
 
-iconys: dc.w    156,174,192
+iconys: dc.w    156,174,192             ; help page: y of the bonus lines
 
         include "gfx.inc"
         include "music.inc"

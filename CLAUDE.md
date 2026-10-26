@@ -12,7 +12,7 @@ Im Spiel ist Deutsch die Standardsprache, Englisch lässt sich im Menü umschalt
 Das Projekt liegt unter `~/fuserunner` (WSL), die Werkzeugkette unter `~/toolchain` (also neben dem Repo, nicht darin).
 
 ```
-src/fuse.asm        Hauptquelltext (~3700 Zeilen), bindet am Ende die *.inc-Dateien ein
+src/fuse.asm        Hauptquelltext (~3900 Zeilen), bindet am Ende die *.inc-Dateien ein
 src/gfx.py          Sprites + Pixel/Masken-Tabellen      -> gfx.inc
 src/backdrops.py    9 Hintergründe als Bytecode         -> bgdata.inc
 src/levels.py       Leveldaten + Erreichbarkeitsprüfung -> levels.inc
