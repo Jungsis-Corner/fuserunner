@@ -71,6 +71,7 @@ python3 tools/sound_notes.py           # Töne aus emu/sound.raw (SDL-"disk"-Aud
 - emu.sh startet nur vasm, nicht die Python-Generatoren. Nach Änderungen an einer `*.py` also zuerst `make.sh` laufen lassen.
 - Titel und Menü erscheinen nach etwa 12–14 s. Der Ladebildschirm wartet auf eine Taste.
 - Xvfb stirbt gelegentlich. emu.sh startet es bei Bedarf neu.
+- **sQLux nach jedem Test beenden** (`pkill -x sqlux`). Solange es läuft, wächst `emu/sound.raw` unbegrenzt (schon auf über 6 GB).
 - Flackern lässt sich im Emulator nicht beurteilen, das muss auf echter Hardware oder dem MiSTer geprüft werden.
 
 Test-Schalter für vasm (`-D...`, alle mit `ifd`/`ifnd` geschützt):
