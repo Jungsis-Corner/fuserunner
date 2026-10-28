@@ -5,6 +5,8 @@
 
 ![FUSE RUNNER – Runde 9: Der Vulkan](screenshots/7_round9_volcano.png)
 
+▶ **[Video: FUSE RUNNER auf YouTube / on YouTube](https://youtube.com/shorts/jkfwM9dSQHQ)**
+
 [Deutsch](#deutsch) · [English](#english)
 
 ---
